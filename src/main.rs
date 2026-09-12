@@ -10,7 +10,10 @@ use axum::{
     routing::get,
     Router,
 };
-use tokio::{net::TcpListener, sync::RwLock};
+use tokio::{
+    net::TcpListener,
+    sync::{broadcast, RwLock},
+};
 use vrchat_osc::{
     models::OscRootNode,
     rosc::{OscPacket, OscType},
@@ -18,40 +21,53 @@ use vrchat_osc::{
 };
 
 type CameraPose = [f32; 6];
-type AppState = Arc<RwLock<CameraPose>>;
 
-async fn get_camera_pose(State(pose): State<AppState>) -> Json<CameraPose> {
-    Json(*pose.read().await)
+struct AppState {
+    camera_pose: RwLock<CameraPose>,
+    pose_updates: broadcast::Sender<CameraPose>,
+}
+
+type SharedState = Arc<AppState>;
+
+async fn get_camera_pose(State(state): State<SharedState>) -> Json<CameraPose> {
+    Json(*state.camera_pose.read().await)
 }
 
 async fn set_camera_pose(
-    State(pose): State<AppState>,
+    State(state): State<SharedState>,
     Json(camera_pose): Json<CameraPose>,
 ) -> StatusCode {
-    *pose.write().await = camera_pose;
+    *state.camera_pose.write().await = camera_pose;
+    let _ = state.pose_updates.send(camera_pose);
     StatusCode::NO_CONTENT
 }
 
 async fn camera_pose_websocket(
     websocket: WebSocketUpgrade,
-    State(pose): State<AppState>,
+    State(state): State<SharedState>,
 ) -> Response {
-    websocket.on_upgrade(move |socket| receive_camera_poses(socket, pose))
+    websocket.on_upgrade(move |socket| stream_camera_poses(socket, state.pose_updates.subscribe()))
 }
 
-async fn receive_camera_poses(mut socket: WebSocket, pose: AppState) {
-    while let Some(result) = socket.recv().await {
-        match result {
-            Ok(Message::Text(message)) => match serde_json::from_str::<CameraPose>(&message) {
-                Ok(camera_pose) => *pose.write().await = camera_pose,
-                Err(error) => log::warn!("Ignoring invalid camera pose websocket message: {error}"),
+async fn stream_camera_poses(
+    mut socket: WebSocket,
+    mut pose_updates: broadcast::Receiver<CameraPose>,
+) {
+    loop {
+        match pose_updates.recv().await {
+            Ok(camera_pose) => match serde_json::to_string(&camera_pose) {
+                Ok(message) => {
+                    if let Err(error) = socket.send(Message::Text(message.into())).await {
+                        log::debug!("Camera pose websocket closed with an error: {error}");
+                        break;
+                    }
+                }
+                Err(error) => log::error!("Failed to serialize camera pose for websocket: {error}"),
             },
-            Ok(Message::Close(_)) => break,
-            Ok(_) => {}
-            Err(error) => {
-                log::debug!("Camera pose websocket closed with an error: {error}");
-                break;
+            Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                log::warn!("Camera pose websocket skipped {skipped} updates");
             }
+            Err(broadcast::error::RecvError::Closed) => break,
         }
     }
 }
@@ -63,7 +79,11 @@ async fn main() -> Result<(), Error> {
         .filter_level(log::LevelFilter::Debug)
         .init();
 
-    let pose = Arc::new(RwLock::new([0.0; 6]));
+    let (pose_updates, _) = broadcast::channel(16);
+    let pose = Arc::new(AppState {
+        camera_pose: RwLock::new([0.0; 6]),
+        pose_updates,
+    });
     let app = Router::new()
         .route(
             "/usercamera/pose",
@@ -91,7 +111,8 @@ async fn main() -> Result<(), Error> {
                         return;
                     }
                 };
-                *osc_pose.blocking_write() = data;
+                *osc_pose.camera_pose.blocking_write() = data;
+                let _ = osc_pose.pose_updates.send(data);
                 log::info!("Received OSC message: {:?}", data);
             }
         })
