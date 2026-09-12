@@ -5,6 +5,7 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         State,
     },
+    http::StatusCode,
     response::{Json, Response},
     routing::get,
     Router,
@@ -21,6 +22,14 @@ type AppState = Arc<RwLock<CameraPose>>;
 
 async fn get_camera_pose(State(pose): State<AppState>) -> Json<CameraPose> {
     Json(*pose.read().await)
+}
+
+async fn set_camera_pose(
+    State(pose): State<AppState>,
+    Json(camera_pose): Json<CameraPose>,
+) -> StatusCode {
+    *pose.write().await = camera_pose;
+    StatusCode::NO_CONTENT
 }
 
 async fn camera_pose_websocket(
@@ -56,7 +65,10 @@ async fn main() -> Result<(), Error> {
 
     let pose = Arc::new(RwLock::new([0.0; 6]));
     let app = Router::new()
-        .route("/usercamera/pose", get(get_camera_pose))
+        .route(
+            "/usercamera/pose",
+            get(get_camera_pose).post(set_camera_pose),
+        )
         .route("/usercamera/pose/ws", get(camera_pose_websocket))
         .with_state(Arc::clone(&pose));
     let listener = TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], 3000))).await?;
