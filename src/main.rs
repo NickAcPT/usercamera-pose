@@ -1,6 +1,14 @@
 use std::{net::SocketAddr, sync::Arc};
 
-use axum::{extract::State, response::Json, routing::get, Router};
+use axum::{
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        State,
+    },
+    response::{Json, Response},
+    routing::get,
+    Router,
+};
 use tokio::{net::TcpListener, sync::RwLock};
 use vrchat_osc::{
     models::OscRootNode,
@@ -15,6 +23,30 @@ async fn get_camera_pose(State(pose): State<AppState>) -> Json<CameraPose> {
     Json(*pose.read().await)
 }
 
+async fn camera_pose_websocket(
+    websocket: WebSocketUpgrade,
+    State(pose): State<AppState>,
+) -> Response {
+    websocket.on_upgrade(move |socket| receive_camera_poses(socket, pose))
+}
+
+async fn receive_camera_poses(mut socket: WebSocket, pose: AppState) {
+    while let Some(result) = socket.recv().await {
+        match result {
+            Ok(Message::Text(message)) => match serde_json::from_str::<CameraPose>(&message) {
+                Ok(camera_pose) => *pose.write().await = camera_pose,
+                Err(error) => log::warn!("Ignoring invalid camera pose websocket message: {error}"),
+            },
+            Ok(Message::Close(_)) => break,
+            Ok(_) => {}
+            Err(error) => {
+                log::debug!("Camera pose websocket closed with an error: {error}");
+                break;
+            }
+        }
+    }
+}
+
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -25,6 +57,7 @@ async fn main() -> Result<(), Error> {
     let pose = Arc::new(RwLock::new([0.0; 6]));
     let app = Router::new()
         .route("/usercamera/pose", get(get_camera_pose))
+        .route("/usercamera/pose/ws", get(camera_pose_websocket))
         .with_state(Arc::clone(&pose));
     let listener = TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], 3000))).await?;
     log::info!("HTTP API listening on http://{}/usercamera/pose", listener.local_addr()?);
