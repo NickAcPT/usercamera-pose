@@ -10,6 +10,10 @@ use axum::{
     routing::get,
     Router,
 };
+use serde::{Deserialize, Serialize};
+use tower_http::cors::{Any, CorsLayer};
+use utoipa::{OpenApi, ToSchema};
+use utoipa_swagger_ui::SwaggerUi;
 use tokio::{
     net::TcpListener,
     sync::{broadcast, RwLock},
@@ -20,7 +24,10 @@ use vrchat_osc::{
     Error, VRChatOSC,
 };
 
-type CameraPose = [f32; 6];
+#[derive(Clone, Copy, Deserialize, Serialize, ToSchema)]
+#[serde(transparent)]
+#[schema(value_type = [f32])]
+struct CameraPose([f32; 6]);
 
 struct AppState {
     camera_pose: RwLock<CameraPose>,
@@ -28,11 +35,25 @@ struct AppState {
 }
 
 type SharedState = Arc<AppState>;
+#[utoipa::path(
+    get,
+    path = "/usercamera/pose",
+    responses((status = 200, description = "Current camera pose.", body = CameraPose))
+)]
 
 async fn get_camera_pose(State(state): State<SharedState>) -> Json<CameraPose> {
     Json(*state.camera_pose.read().await)
 }
 
+#[utoipa::path(
+    post,
+    path = "/usercamera/pose",
+    request_body = CameraPose,
+    responses(
+        (status = 204, description = "Camera pose updated."),
+        (status = 422, description = "Request body is not a six-element pose array.")
+    )
+)]
 async fn set_camera_pose(
     State(state): State<SharedState>,
     Json(camera_pose): Json<CameraPose>,
@@ -42,6 +63,11 @@ async fn set_camera_pose(
     StatusCode::NO_CONTENT
 }
 
+#[utoipa::path(
+    get,
+    path = "/usercamera/pose/ws",
+    responses((status = 101, description = "Streams each subsequent camera pose as a JSON array."))
+)]
 async fn camera_pose_websocket(
     websocket: WebSocketUpgrade,
     State(state): State<SharedState>,
@@ -73,6 +99,14 @@ async fn stream_camera_poses(
 }
 
 
+#[derive(OpenApi)]
+#[openapi(
+    paths(get_camera_pose, set_camera_pose, camera_pose_websocket),
+    components(schemas(CameraPose)),
+    info(title = "User Camera Pose API", version = "0.1.0")
+)]
+struct ApiDoc;
+
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     env_logger::builder()
@@ -81,7 +115,7 @@ async fn main() -> Result<(), Error> {
 
     let (pose_updates, _) = broadcast::channel(16);
     let pose = Arc::new(AppState {
-        camera_pose: RwLock::new([0.0; 6]),
+        camera_pose: RwLock::new(CameraPose([0.0; 6])),
         pose_updates,
     });
     let app = Router::new()
@@ -90,6 +124,16 @@ async fn main() -> Result<(), Error> {
             get(get_camera_pose).post(set_camera_pose),
         )
         .route("/usercamera/pose/ws", get(camera_pose_websocket))
+        .merge(
+            SwaggerUi::new("/swagger-ui")
+                .url("/api-docs/openapi.json", ApiDoc::openapi()),
+        )
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods(Any)
+                .allow_headers(Any),
+        )
         .with_state(Arc::clone(&pose));
     let listener = TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], 3000))).await?;
     log::info!("HTTP API listening on http://{}/usercamera/pose", listener.local_addr()?);
@@ -104,8 +148,8 @@ async fn main() -> Result<(), Error> {
     vrchat_osc
         .register("NickUserCameraPose", root_node, move |packet| {
             if let OscPacket::Message(msg) = packet && msg.addr == "/usercamera/Pose" {
-                let data: CameraPose = match &msg.args[..] {
-                    [OscType::Float(a), OscType::Float(b), OscType::Float(c), OscType::Float(d), OscType::Float(e), OscType::Float(f)] => [*a, *b, *c, *d, *e, *f],
+                let data = match &msg.args[..] {
+                    [OscType::Float(a), OscType::Float(b), OscType::Float(c), OscType::Float(d), OscType::Float(e), OscType::Float(f)] => CameraPose([*a, *b, *c, *d, *e, *f]),
                     _ => {
                         log::error!("Unexpected number of arguments in OSC message: {:?}", msg.args);
                         return;
@@ -113,7 +157,7 @@ async fn main() -> Result<(), Error> {
                 };
                 *osc_pose.camera_pose.blocking_write() = data;
                 let _ = osc_pose.pose_updates.send(data);
-                log::info!("Received OSC message: {:?}", data);
+                log::info!("Received OSC message: {:?}", data.0);
             }
         })
         .await?;
