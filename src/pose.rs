@@ -1,7 +1,7 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use serde::{Deserialize, Serialize};
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::broadcast;
 use utoipa::ToSchema;
 
 const UPDATE_BUFFER_CAPACITY: usize = 16;
@@ -25,19 +25,15 @@ impl PoseState {
         }
     }
 
-    pub async fn get(&self) -> CameraPose {
-        *self.camera_pose.read().await
+    pub fn get(&self) -> CameraPose {
+        *self.camera_pose.read().expect("camera pose lock poisoned")
     }
 
-    pub async fn update(&self, camera_pose: CameraPose) {
-        *self.camera_pose.write().await = camera_pose;
+    pub fn update(&self, camera_pose: CameraPose) {
+        *self.camera_pose.write().expect("camera pose lock poisoned") = camera_pose;
         self.publish(camera_pose);
     }
 
-    pub fn update_blocking(&self, camera_pose: CameraPose) {
-        *self.camera_pose.blocking_write() = camera_pose;
-        self.publish(camera_pose);
-    }
 
     pub fn subscribe(&self) -> broadcast::Receiver<CameraPose> {
         self.pose_updates.subscribe()

@@ -26,7 +26,7 @@ pub async fn register_usercamera_service(
                     }
                 };
 
-                pose_state.update_blocking(camera_pose);
+                pose_state.update(camera_pose);
                 log::debug!("Received OSC camera pose: {:?}", camera_pose.0);
             }
         })

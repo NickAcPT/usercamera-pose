@@ -48,7 +48,7 @@ pub fn router(pose_state: SharedPoseState) -> Router {
     responses((status = 200, description = "Current camera pose.", body = CameraPose))
 )]
 async fn get_camera_pose(State(pose_state): State<SharedPoseState>) -> Json<CameraPose> {
-    Json(pose_state.get().await)
+    Json(pose_state.get())
 }
 
 #[utoipa::path(
@@ -64,7 +64,7 @@ async fn set_camera_pose(
     State(pose_state): State<SharedPoseState>,
     Json(camera_pose): Json<CameraPose>,
 ) -> StatusCode {
-    pose_state.update(camera_pose).await;
+    pose_state.update(camera_pose);
     StatusCode::NO_CONTENT
 }
 
