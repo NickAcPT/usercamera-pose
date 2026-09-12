@@ -110,7 +110,8 @@ struct ApiDoc;
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     env_logger::builder()
-        .filter_level(log::LevelFilter::Debug)
+        .filter_level(log::LevelFilter::Info)
+        .filter_module("vrchat_osc", log::LevelFilter::Warn)
         .init();
 
     let (pose_updates, _) = broadcast::channel(16);
