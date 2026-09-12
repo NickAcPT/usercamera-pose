@@ -137,7 +137,7 @@ async fn main() -> Result<(), Error> {
         )
         .with_state(Arc::clone(&pose));
     let listener = TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], 3000))).await?;
-    log::info!("HTTP API listening on http://{}/usercamera/pose", listener.local_addr()?);
+    let port = listener.local_addr()?.port();
 
     // Initialize VRChatOSC instance.
     // When None is passed, automatically selects a non-loopback IPv4 interface.
@@ -158,11 +158,14 @@ async fn main() -> Result<(), Error> {
                 };
                 *osc_pose.camera_pose.blocking_write() = data;
                 let _ = osc_pose.pose_updates.send(data);
-                log::info!("Received OSC message: {:?}", data.0);
+                log::debug!("Received OSC message: {:?}", data.0);
             }
         })
         .await?;
     log::info!("Service registered.");
+    log::info!("Pose API: http://localhost:{port}/usercamera/pose");
+    log::info!("Pose WebSocket: ws://localhost:{port}/usercamera/pose/ws");
+    log::info!("API documentation: http://localhost:{port}/swagger-ui/");
 
     log::info!("Press Ctrl+C to exit.");
     tokio::select! {
