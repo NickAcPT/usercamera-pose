@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -12,7 +14,10 @@ use tower_http::cors::{Any, CorsLayer};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
-use crate::pose::{CameraPose, SharedPoseState};
+use crate::{
+    osc,
+    pose::{CameraPose, SharedPoseState},
+};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -22,7 +27,13 @@ use crate::pose::{CameraPose, SharedPoseState};
 )]
 struct ApiDoc;
 
-pub fn router(pose_state: SharedPoseState) -> Router {
+#[derive(Clone)]
+struct ApiState {
+    pose_state: SharedPoseState,
+    vrchat_osc: Arc<vrchat_osc::VRChatOSC>,
+}
+
+pub fn router(pose_state: SharedPoseState, vrchat_osc: Arc<vrchat_osc::VRChatOSC>) -> Router {
     Router::new()
         .route(
             "/usercamera/pose",
@@ -39,7 +50,10 @@ pub fn router(pose_state: SharedPoseState) -> Router {
                 .allow_methods(Any)
                 .allow_headers(Any),
         )
-        .with_state(pose_state)
+        .with_state(ApiState {
+            pose_state,
+            vrchat_osc,
+        })
 }
 
 #[utoipa::path(
@@ -47,8 +61,8 @@ pub fn router(pose_state: SharedPoseState) -> Router {
     path = "/usercamera/pose",
     responses((status = 200, description = "Current camera pose.", body = CameraPose))
 )]
-async fn get_camera_pose(State(pose_state): State<SharedPoseState>) -> Json<CameraPose> {
-    Json(pose_state.get())
+async fn get_camera_pose(State(state): State<ApiState>) -> Json<CameraPose> {
+    Json(state.pose_state.get())
 }
 
 #[utoipa::path(
@@ -56,15 +70,21 @@ async fn get_camera_pose(State(pose_state): State<SharedPoseState>) -> Json<Came
     path = "/usercamera/pose",
     request_body = CameraPose,
     responses(
-        (status = 204, description = "Camera pose updated."),
-        (status = 422, description = "Request body is not a six-element pose array.")
+        (status = 204, description = "Camera pose sent to VRChat and updated."),
+        (status = 422, description = "Request body is not a six-element pose array."),
+        (status = 502, description = "Unable to send the camera pose to VRChat.")
     )
 )]
 async fn set_camera_pose(
-    State(pose_state): State<SharedPoseState>,
+    State(state): State<ApiState>,
     Json(camera_pose): Json<CameraPose>,
 ) -> StatusCode {
-    pose_state.update(camera_pose);
+    if let Err(error) = osc::send_camera_pose(&state.vrchat_osc, camera_pose).await {
+        log::error!("Failed to send camera pose to VRChat: {error}");
+        return StatusCode::BAD_GATEWAY;
+    }
+
+    state.pose_state.update(camera_pose);
     StatusCode::NO_CONTENT
 }
 
@@ -75,9 +95,9 @@ async fn set_camera_pose(
 )]
 async fn camera_pose_websocket(
     websocket: WebSocketUpgrade,
-    State(pose_state): State<SharedPoseState>,
+    State(state): State<ApiState>,
 ) -> Response {
-    websocket.on_upgrade(move |socket| stream_camera_poses(socket, pose_state.subscribe()))
+    websocket.on_upgrade(move |socket| stream_camera_poses(socket, state.pose_state.subscribe()))
 }
 
 async fn stream_camera_poses(

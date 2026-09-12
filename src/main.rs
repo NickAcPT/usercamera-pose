@@ -17,11 +17,11 @@ async fn main() -> Result<(), Error> {
         .init();
 
     let pose_state = Arc::new(PoseState::new());
-    let app = api::router(Arc::clone(&pose_state));
+    let vrchat_osc = VRChatOSC::new(None).await?;
+    let app = api::router(Arc::clone(&pose_state), Arc::clone(&vrchat_osc));
     let listener = TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], 3000))).await?;
     let port = listener.local_addr()?.port();
 
-    let vrchat_osc = VRChatOSC::new(None).await?;
     osc::register_usercamera_service(&vrchat_osc, pose_state).await?;
 
     log::info!("Pose API: http://localhost:{port}/usercamera/pose");

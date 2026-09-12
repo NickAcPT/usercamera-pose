@@ -1,12 +1,29 @@
 use crate::pose::{CameraPose, SharedPoseState};
 use vrchat_osc::{
     models::OscRootNode,
-    rosc::{OscPacket, OscType},
+    rosc::{OscMessage, OscPacket, OscType},
     Error, VRChatOSC,
 };
 
 const SERVICE_NAME: &str = "NickUserCameraPose";
 const USER_CAMERA_POSE_ADDRESS: &str = "/usercamera/Pose";
+
+const VRCHAT_CLIENT_SERVICE: &str = "VRChat-Client-*";
+
+pub async fn send_camera_pose(
+    vrchat_osc: &VRChatOSC,
+    camera_pose: CameraPose,
+) -> Result<(), Error> {
+    vrchat_osc
+        .send(
+            OscPacket::Message(OscMessage {
+                addr: USER_CAMERA_POSE_ADDRESS.to_owned(),
+                args: camera_pose.0.into_iter().map(OscType::Float).collect(),
+            }),
+            VRCHAT_CLIENT_SERVICE,
+        )
+        .await
+}
 
 pub async fn register_usercamera_service(
     vrchat_osc: &VRChatOSC,
