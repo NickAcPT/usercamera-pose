@@ -34,7 +34,6 @@ impl PoseState {
         self.publish(camera_pose);
     }
 
-
     pub fn subscribe(&self) -> broadcast::Receiver<CameraPose> {
         self.pose_updates.subscribe()
     }

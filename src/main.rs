@@ -1,24 +1,30 @@
 mod api;
+mod capture;
 mod osc;
 mod pose;
 
 use std::{net::SocketAddr, sync::Arc};
 
 use tokio::net::TcpListener;
-use vrchat_osc::{Error, VRChatOSC};
+use vrchat_osc::VRChatOSC;
 
 use crate::pose::PoseState;
 
 #[tokio::main]
-async fn main() -> Result<(), Error> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::builder()
         .filter_level(log::LevelFilter::Info)
         .filter_module("vrchat_osc", log::LevelFilter::Warn)
         .init();
 
     let pose_state = Arc::new(PoseState::new());
+    let capture_state = Arc::new(capture::CaptureState::new()?);
     let vrchat_osc = VRChatOSC::new(None).await?;
-    let app = api::router(Arc::clone(&pose_state), Arc::clone(&vrchat_osc));
+    let app = api::router(
+        Arc::clone(&pose_state),
+        Arc::clone(&vrchat_osc),
+        Arc::clone(&capture_state),
+    );
     let listener = TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], 3000))).await?;
     let port = listener.local_addr()?.port();
 
