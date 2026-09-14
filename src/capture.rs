@@ -58,11 +58,9 @@ impl CaptureState {
 
     pub async fn capture_png_after(&self, delay: Duration) -> Result<Vec<u8>, CaptureError> {
         let (reply, response) = oneshot::channel();
+        let not_before = Instant::now() + delay;
         self.requests
-            .send(CaptureRequest {
-                not_before: Instant::now() + delay,
-                reply,
-            })
+            .send(CaptureRequest { not_before, reply })
             .await
             .map_err(|_| CaptureError::WorkerStopped)?;
 
@@ -122,6 +120,7 @@ impl std::error::Error for CaptureError {}
 fn capture_worker(mut requests: mpsc::Receiver<CaptureRequest>) {
     let mut pending = VecDeque::new();
     let mut reader = None;
+    let mut last_reader_error = None;
 
     loop {
         while let Ok(request) = requests.try_recv() {
@@ -143,10 +142,20 @@ fn capture_worker(mut requests: mpsc::Receiver<CaptureRequest>) {
         }
 
         if reader.is_none() {
-            reader = create_reader().ok();
-            if reader.is_none() {
-                std::thread::sleep(POLL_INTERVAL);
-                continue;
+            match create_reader() {
+                Ok(new_reader) => {
+                    last_reader_error = None;
+                    reader = Some(new_reader);
+                }
+                Err(error) => {
+                    let error_message = error.to_string();
+                    if last_reader_error.as_deref() != Some(error_message.as_str()) {
+                        log::warn!("Spout capture reader initialization failed: {error_message}");
+                    }
+                    last_reader_error = Some(error_message);
+                    std::thread::sleep(POLL_INTERVAL);
+                    continue;
+                }
             }
         }
 
@@ -374,6 +383,7 @@ fn encode_png(
     let mut encoder = png::Encoder::new(Cursor::new(&mut output), width, height);
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
+    encoder.set_compression(png::Compression::Fast);
     let mut writer = encoder.write_header().map_err(CaptureError::Png)?;
     writer.write_image_data(&rgba).map_err(CaptureError::Png)?;
     drop(writer);

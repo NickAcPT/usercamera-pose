@@ -32,6 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     log::info!("Pose API: http://localhost:{port}/usercamera/pose");
     log::info!("Pose WebSocket: ws://localhost:{port}/usercamera/pose/ws");
+    log::info!("Capture API: http://localhost:{port}/usercamera/capture");
     log::info!("API documentation: http://localhost:{port}/swagger-ui/");
     log::info!("Press Ctrl+C to exit.");
 

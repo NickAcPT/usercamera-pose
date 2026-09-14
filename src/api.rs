@@ -126,8 +126,9 @@ async fn capture_camera_pose(
             "unable to configure VRChat camera streaming".to_owned(),
         ));
     }
+
     if let Err(error) = osc::send_camera_pose(&state.vrchat_osc, camera_pose).await {
-        log::error!("Failed to send capture camera pose to VRChat: {error}");
+        log::error!("Failed to send capture camera pose: {error}");
         return Err((
             StatusCode::BAD_GATEWAY,
             "unable to move the VRChat camera".to_owned(),
@@ -140,7 +141,7 @@ async fn capture_camera_pose(
     // a blocking Direct3D readback.
     let png = state
         .capture_state
-        .capture_png_after(std::time::Duration::from_millis(250))
+        .capture_png_after(std::time::Duration::from_millis(50))
         .await
         .map_err(|error| {
             log::error!("Failed to capture Spout frame: {error}");
