@@ -8,9 +8,9 @@ use vrchat_osc::{
 };
 
 const SERVICE_NAME: &str = "NickUserCameraPose";
-const USER_CAMERA_POSE_ADDRESS: &str = "/usercamera/Pose";
+pub(crate) const USER_CAMERA_POSE_ADDRESS: &str = "/usercamera/Pose";
 
-const VRCHAT_CLIENT_SERVICE: &str = "VRChat-Client-*";
+pub(crate) const VRCHAT_CLIENT_SERVICE: &str = "VRChat-Client-*";
 
 const USER_CAMERA_MODE_ADDRESS: &str = "/usercamera/Mode";
 const USER_CAMERA_STREAMING_ADDRESS: &str = "/usercamera/Streaming";

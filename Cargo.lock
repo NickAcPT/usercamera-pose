@@ -1852,6 +1852,7 @@ dependencies = [
  "serde",
  "serde_json",
  "spout-rs",
+ "thiserror",
  "tokio",
  "tower-http",
  "utoipa",

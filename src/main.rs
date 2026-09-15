@@ -1,9 +1,13 @@
 mod api;
 mod capture;
 mod osc;
+mod parameters;
 mod pose;
 
 use std::{net::SocketAddr, sync::Arc};
+
+use axum::{ServiceExt, extract::Request};
+use tower_http::normalize_path::NormalizePath;
 
 use tokio::net::TcpListener;
 use vrchat_osc::VRChatOSC;
@@ -21,12 +25,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let capture_state = Arc::new(capture::CaptureState::new()?);
     let vrchat_osc = VRChatOSC::new(None).await?;
     let camera_stream_state = Arc::new(osc::CameraStreamState::default());
-    let app = api::router(
+    let app = NormalizePath::trim_trailing_slash(api::router(
         Arc::clone(&pose_state),
         Arc::clone(&vrchat_osc),
         Arc::clone(&capture_state),
         Arc::clone(&camera_stream_state),
-    );
+    ));
+    let app = <NormalizePath<axum::Router> as ServiceExt<Request>>::into_make_service(app);
     let listener = TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], 3000))).await?;
     let port = listener.local_addr()?.port();
 
@@ -38,6 +43,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     log::info!("Pose API: http://localhost:{port}/usercamera/pose");
+    log::info!("OSC API: http://localhost:{port}/osc");
     log::info!("Pose WebSocket: ws://localhost:{port}/usercamera/pose/ws");
     log::info!("Capture API: http://localhost:{port}/usercamera/capture");
     log::info!("API documentation: http://localhost:{port}/swagger-ui/");
