@@ -4,7 +4,7 @@ mod osc;
 mod parameters;
 mod pose;
 
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use axum::{ServiceExt, extract::Request};
 use tower_http::normalize_path::NormalizePath;
@@ -14,12 +14,37 @@ use vrchat_osc::VRChatOSC;
 
 use crate::pose::PoseState;
 
+const DEFAULT_CAPTURE_DELAY: Duration = Duration::from_millis(45);
+
+fn parse_capture_delay() -> Result<Duration, String> {
+    let mut arguments = std::env::args().skip(1);
+    let mut capture_delay = DEFAULT_CAPTURE_DELAY;
+
+    while let Some(argument) = arguments.next() {
+        if argument != "--capture-delay" {
+            return Err(format!("unrecognized argument: {argument}"));
+        }
+
+        let milliseconds = arguments
+            .next()
+            .ok_or_else(|| "missing value for --capture-delay".to_owned())?
+            .parse::<u64>()
+            .map_err(|_| {
+                "--capture-delay must be an unsigned integer in milliseconds".to_owned()
+            })?;
+        capture_delay = Duration::from_millis(milliseconds);
+    }
+
+    Ok(capture_delay)
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::builder()
         .filter_level(log::LevelFilter::Info)
         .filter_module("vrchat_osc", log::LevelFilter::Warn)
         .init();
+    let capture_delay = parse_capture_delay().map_err(std::io::Error::other)?;
 
     let pose_state = Arc::new(PoseState::new());
     let capture_state = Arc::new(capture::CaptureState::new()?);
@@ -30,6 +55,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&vrchat_osc),
         Arc::clone(&capture_state),
         Arc::clone(&camera_stream_state),
+        capture_delay,
     ));
     let app = <NormalizePath<axum::Router> as ServiceExt<Request>>::into_make_service(app);
     let listener = TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], 3000))).await?;

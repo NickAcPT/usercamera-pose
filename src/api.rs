@@ -22,8 +22,6 @@ use crate::{
     pose::{CameraPose, SharedPoseState},
 };
 
-const CAPTURE_SETTLING_DELAY: Duration = Duration::from_millis(5);
-
 #[derive(OpenApi)]
 #[openapi(
     paths(
@@ -46,6 +44,7 @@ struct ApiState {
     vrchat_osc: Arc<vrchat_osc::VRChatOSC>,
     capture_state: Arc<CaptureState>,
     camera_stream_state: Arc<CameraStreamState>,
+    capture_delay: Duration,
     capture_request_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
@@ -54,6 +53,7 @@ pub fn router(
     vrchat_osc: Arc<vrchat_osc::VRChatOSC>,
     capture_state: Arc<CaptureState>,
     camera_stream_state: Arc<CameraStreamState>,
+    capture_delay: Duration,
 ) -> Router {
     Router::new()
         .route(
@@ -80,6 +80,7 @@ pub fn router(
             capture_state,
             camera_stream_state,
             capture_request_lock: Arc::new(tokio::sync::Mutex::new(())),
+            capture_delay,
         })
 }
 
@@ -295,11 +296,11 @@ async fn capture_camera_pose(
     }
     state.pose_state.update(camera_pose);
 
-    // Spout carries no pose metadata. Give VRChat 5 ms to apply the OSC command, then
-    // capture the next Spout frame it publishes.
+    // Spout carries no pose metadata. Wait for the configured delay after moving the camera,
+    // then capture the next frame it publishes.
     let png = state
         .capture_state
-        .capture_png_after(CAPTURE_SETTLING_DELAY)
+        .capture_png_after(state.capture_delay)
         .await
         .map_err(|error| {
             log::error!("Failed to capture Spout frame: {error}");
