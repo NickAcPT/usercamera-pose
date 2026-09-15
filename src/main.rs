@@ -20,15 +20,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pose_state = Arc::new(PoseState::new());
     let capture_state = Arc::new(capture::CaptureState::new()?);
     let vrchat_osc = VRChatOSC::new(None).await?;
+    let camera_stream_state = Arc::new(osc::CameraStreamState::default());
     let app = api::router(
         Arc::clone(&pose_state),
         Arc::clone(&vrchat_osc),
         Arc::clone(&capture_state),
+        Arc::clone(&camera_stream_state),
     );
     let listener = TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], 3000))).await?;
     let port = listener.local_addr()?.port();
 
-    osc::register_usercamera_service(&vrchat_osc, pose_state).await?;
+    osc::register_usercamera_service(&vrchat_osc, pose_state, Arc::clone(&camera_stream_state))
+        .await?;
+    if let Err(error) = osc::initialize_camera_stream_state(&vrchat_osc, &camera_stream_state).await
+    {
+        log::warn!("Unable to query initial VRChat camera state: {error}");
+    }
 
     log::info!("Pose API: http://localhost:{port}/usercamera/pose");
     log::info!("Pose WebSocket: ws://localhost:{port}/usercamera/pose/ws");

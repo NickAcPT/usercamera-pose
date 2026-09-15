@@ -31,7 +31,7 @@ use windows::{
 const VRC_SPOUT_SENDER: &str = "VRCSender1";
 const REQUEST_QUEUE_CAPACITY: usize = 16;
 const FRAME_TIMEOUT: Duration = Duration::from_secs(5);
-const POLL_INTERVAL: Duration = Duration::from_millis(10);
+const POLL_INTERVAL: Duration = Duration::from_millis(1);
 const DXGI_FORMAT_B8G8R8A8_UNORM: u32 = 87;
 const DXGI_FORMAT_R8G8B8A8_UNORM: u32 = 28;
 
@@ -58,9 +58,11 @@ impl CaptureState {
 
     pub async fn capture_png_after(&self, delay: Duration) -> Result<Vec<u8>, CaptureError> {
         let (reply, response) = oneshot::channel();
-        let not_before = Instant::now() + delay;
         self.requests
-            .send(CaptureRequest { not_before, reply })
+            .send(CaptureRequest {
+                not_before: Instant::now() + delay,
+                reply,
+            })
             .await
             .map_err(|_| CaptureError::WorkerStopped)?;
 
@@ -326,6 +328,9 @@ impl DxReader {
             if !self.receiver.receive_texture(self.target.as_raw() as usize) {
                 return Ok(None);
             }
+        }
+        if !self.receiver.is_frame_new() {
+            return Ok(None);
         }
 
         unsafe {

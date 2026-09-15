@@ -6,7 +6,7 @@ use utoipa::ToSchema;
 
 const UPDATE_BUFFER_CAPACITY: usize = 16;
 
-#[derive(Clone, Copy, Deserialize, Serialize, ToSchema)]
+#[derive(Clone, Copy, Deserialize, PartialEq, Serialize, ToSchema)]
 #[serde(transparent)]
 #[schema(value_type = [f32])]
 pub struct CameraPose(pub [f32; 6]);

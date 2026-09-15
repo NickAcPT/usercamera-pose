@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use axum::{
     Router,
@@ -16,9 +16,11 @@ use utoipa_swagger_ui::SwaggerUi;
 
 use crate::{
     capture::CaptureState,
-    osc,
+    osc::{self, CameraStreamState},
     pose::{CameraPose, SharedPoseState},
 };
+
+const CAPTURE_SETTLING_DELAY: Duration = Duration::from_millis(5);
 
 #[derive(OpenApi)]
 #[openapi(
@@ -38,6 +40,7 @@ struct ApiState {
     pose_state: SharedPoseState,
     vrchat_osc: Arc<vrchat_osc::VRChatOSC>,
     capture_state: Arc<CaptureState>,
+    camera_stream_state: Arc<CameraStreamState>,
     capture_request_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
@@ -45,6 +48,7 @@ pub fn router(
     pose_state: SharedPoseState,
     vrchat_osc: Arc<vrchat_osc::VRChatOSC>,
     capture_state: Arc<CaptureState>,
+    camera_stream_state: Arc<CameraStreamState>,
 ) -> Router {
     Router::new()
         .route(
@@ -64,6 +68,7 @@ pub fn router(
             pose_state,
             vrchat_osc,
             capture_state,
+            camera_stream_state,
             capture_request_lock: Arc::new(tokio::sync::Mutex::new(())),
         })
 }
@@ -119,7 +124,9 @@ async fn capture_camera_pose(
     // request from moving the camera while this request waits for its post-move frame.
     let _capture_request_guard = state.capture_request_lock.lock().await;
 
-    if let Err(error) = osc::configure_camera_stream(&state.vrchat_osc).await {
+    if let Err(error) =
+        osc::configure_camera_stream(&state.vrchat_osc, &state.camera_stream_state).await
+    {
         log::error!("Failed to configure VRChat camera streaming: {error}");
         return Err((
             StatusCode::BAD_GATEWAY,
@@ -136,12 +143,11 @@ async fn capture_camera_pose(
     }
     state.pose_state.update(camera_pose);
 
-    // Queue the request before returning. The worker receives the first frame it can
-    // read after this post-pose settling interval, rather than tying an HTTP worker to
-    // a blocking Direct3D readback.
+    // Spout carries no pose metadata. Give VRChat 5 ms to apply the OSC command, then
+    // capture the next Spout frame it publishes.
     let png = state
         .capture_state
-        .capture_png_after(std::time::Duration::from_millis(50))
+        .capture_png_after(CAPTURE_SETTLING_DELAY)
         .await
         .map_err(|error| {
             log::error!("Failed to capture Spout frame: {error}");
