@@ -6,9 +6,6 @@ mod pose;
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
-use axum::{ServiceExt, extract::Request};
-use tower_http::normalize_path::NormalizePath;
-
 use tokio::net::TcpListener;
 use vrchat_osc::VRChatOSC;
 
@@ -41,7 +38,7 @@ fn parse_capture_delay() -> Result<Duration, String> {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::builder()
-        .filter_level(log::LevelFilter::Info)
+        .filter_level(log::LevelFilter::Trace)
         .filter_module("vrchat_osc", log::LevelFilter::Warn)
         .init();
     let capture_delay = parse_capture_delay().map_err(std::io::Error::other)?;
@@ -50,14 +47,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let capture_state = Arc::new(capture::CaptureState::new()?);
     let vrchat_osc = VRChatOSC::new(None).await?;
     let camera_stream_state = Arc::new(osc::CameraStreamState::default());
-    let app = NormalizePath::trim_trailing_slash(api::router(
+    let app = api::router(
         Arc::clone(&pose_state),
         Arc::clone(&vrchat_osc),
         Arc::clone(&capture_state),
         Arc::clone(&camera_stream_state),
         capture_delay,
-    ));
-    let app = <NormalizePath<axum::Router> as ServiceExt<Request>>::into_make_service(app);
+    );
     let listener = TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], 3000))).await?;
     let port = listener.local_addr()?.port();
 
